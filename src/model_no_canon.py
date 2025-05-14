@@ -49,7 +49,6 @@ class MultiheadLatentAttn(nn.Module):
         self.d_nope_head = args.d_nope_head
         self.d_rope_head = args.d_rope_head
         self.d_head_qk = self.d_rope_head + self.d_nope_head
-        self.d_head_qk = args.d_head_qk
         self.wq_a = nn.Linear(self.d_model, self.d_latent_q) 
         self.q_norm = RMSNorm(self.d_latent_q)
         self.wq_b = nn.Linear(self.d_latent_q, self.n_heads * self.d_head_qk)
@@ -62,7 +61,7 @@ class MultiheadLatentAttn(nn.Module):
         self.register_buffer("kv_cache", torch.zeros(args.max_batch_size, args.max_seq_len, self.d_latent_kv), persistent=False)
         self.register_buffer("key_rope_cache", torch.zeros(args.max_batch_size, args.max_seq_len, self.d_rope_head), persistent=False)
         # scalable softmax is a drop in replacement for standard softmax that helps with long context: https://arxiv.org/pdf/2501.19399
-        self.softpick = ScalableSoftmax()
+        self.ssmax = ScalableSoftmax()
         self.sqrt_d_model = self.d_head_qk ** -0.5
         self.training = args.training
 
@@ -79,7 +78,7 @@ class MultiheadLatentAttn(nn.Module):
         query = query.view(batch_size, seq_len, self.n_heads, self.d_head_qk)
         # split query into diff uses; no pos and pos: (b, sl, h, qkh) -> (b, sl, h, nh), (b, sl, h, rh)
         query_nope, query_rope = torch.split(query, [self.d_nope_head, self.d_rope_head], dim=-1)
-        # apply rope to query_rope  
+        # apply rope to query_rope
         query_rope = apply_rotary_emb(query_rope, rot_factors)
 
         # input -> latent kv
@@ -134,6 +133,7 @@ class LanguageModel(nn.Module):
         self.layers = nn.ModuleList([TransformerBlock(args) for _ in range(args.n_layers)])
         self.prenorm = RMSNorm(args.d_model, eps=args.norm_eps)
         self.lm_head = nn.Linear(args.d_model, self.vocab_size, bias=False)
+
         self.head_dim = self.args.d_model // self.args.n_heads
         self.rot_factors = precompute_rot_factors(self.args.d_model // self.args.n_heads, self.args.max_seq_len * 2, self.args.device)
 
